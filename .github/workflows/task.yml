@@ -15,12 +15,12 @@ jobs:
           dotnet-version: 6.0.x
 
       - run: |
-        dotnet restore
-        dotnet build
-        dotnet publish -r win-x64 --self-contained -c release
+          dotnet restore
+          dotnet build
+          dotnet publish -r win-x64 --self-contained -c release
                     
       - run: |
-        Compress-Archive -Path bin/release/* -DestinationPath AudioRec.zip
+          Compress-Archive -Path bin/release/* -DestinationPath AudioRec.zip
 
       - uses: softprops/action-gh-release@v1
         with:
