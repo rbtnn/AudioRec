@@ -1,0 +1,30 @@
+name: AudioRec
+
+on:
+  push:
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v2
+        
+      - uses: actions/setup-dotnet@v1
+        with:
+          dotnet-version: 6.0.x
+
+      - run: |
+        dotnet restore
+        dotnet build
+        dotnet publish -r win-x64 --self-contained -c release
+                    
+      - run: |
+        Compress-Archive -Path bin/release/* -DestinationPath AudioRec.zip
+
+      - uses: softprops/action-gh-release@v1
+        with:
+          files: AudioRec.zip
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
