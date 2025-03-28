@@ -24,7 +24,7 @@ jobs:
           dotnet publish -r win-x64 -c Release /p:PublishSingleFile=true /p:SelfContained=true
                     
       - run: |
-          Compress-Archive -Path bin/Release/net6.0/win-x64/publish/* -DestinationPath AudioRec.zip
+          Compress-Archive -Path bin/Release/net9.0/win-x64/publish/* -DestinationPath AudioRec.zip
 
       - uses: softprops/action-gh-release@v1
         with:
