@@ -2,6 +2,8 @@ name: AudioRec
 
 on:
   push:
+    tags:
+      - 'v*'
 
 jobs:
   build:
