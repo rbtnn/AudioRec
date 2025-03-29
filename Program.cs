@@ -1,11 +1,28 @@
 ﻿
 using NAudio.Wave;
 using NAudio.CoreAudioApi;
+using Vosk;
+using System.Linq;
+using System.Text;
+using System.Text.Json;
 
 public class Prog {
   public static void Main() {
+    var modelPath = "vosk-model-small-ja-0.22";
     var wavFileName = "audio.wav";
     var mp3FileName = wavFileName.Replace(".wav", ".mp3");
+    var txtFileName = "audio.txt";
+    if (Directory.Exists(modelPath)) {
+      Recording(wavFileName);
+      ConvertMP3(wavFileName, mp3FileName);
+      Sampling(wavFileName, txtFileName, modelPath);
+    }
+    else {
+      Console.WriteLine("「{0}」が存在しません。https://alphacephei.com/vosk/models からダウンロードしてください。", modelPath);
+    }
+  }
+
+  private static void Recording(string wavFileName) {
     using (var enumerator = new MMDeviceEnumerator()) {
       var device = enumerator.GetDefaultAudioEndpoint(DataFlow.Render, Role.Console);
       using (var wasapiCapture = new WasapiLoopbackCapture(device)) {
@@ -23,35 +40,52 @@ public class Prog {
           wasapiCapture.StopRecording();
         }
       }
-      Console.WriteLine("録音を終了しました。");
-      Console.WriteLine("wavファイルをmp3ファイルに変換します。");
-      using (var reader = new WaveFileReader(wavFileName)) {
-        MediaFoundationEncoder.EncodeToMp3(reader, mp3FileName);
-      }
-      Console.WriteLine("mp3ファイルに変換しました。");
-      using (var reader = new Mp3FileReader(mp3FileName))
-      {
-        var len = (new FileInfo(mp3FileName)).Length;
-        var fmb = len / 1024.0 / 1024.0;
-        var fkb = len / 1024.0;
-        var totalTime = reader.TotalTime;
-        var waveFormat = reader.Mp3WaveFormat;
-        Console.WriteLine();
-        Console.WriteLine("=====================================");
-        Console.WriteLine("ファイル名        : {0}", mp3FileName);
-        if (fmb < 1) {
-          Console.WriteLine("ファイルサイズ    : {0} KB",  Math.Floor(fkb * 10) / 10);
-        }
-        else {
-          Console.WriteLine("ファイルサイズ    : {0} MB",  Math.Floor(fmb * 10) / 10);
-        }
-        Console.WriteLine("長さ              : {0:D2}:{1:D2}:{2:D2}", totalTime.Hours, totalTime.Minutes, totalTime.Seconds);
-        Console.WriteLine("サンプリングレート: {0} Hz", waveFormat.SampleRate);
-        Console.WriteLine("チャンネル数      : {0} ch", waveFormat.Channels);
-        Console.WriteLine("ビットレート      : {0} kbps", waveFormat.AverageBytesPerSecond * 8 / 1000);
-        Console.WriteLine("=====================================");
-      }
-      File.Delete(wavFileName);
     }
+  }
+
+  private static void ConvertMP3(string wavFileName, string mp3FileName) {
+    Console.WriteLine("wavファイルをmp3ファイルに変換します。");
+    using (var reader = new WaveFileReader(wavFileName)) {
+      MediaFoundationEncoder.EncodeToMp3(reader, mp3FileName);
+    }
+  }
+
+  private static void Sampling(string wavFileName, string txtFileName, string modelPath) {
+    Console.WriteLine("==============================================");
+    Vosk.Vosk.SetLogLevel(-1);
+    var model = new Model(modelPath);
+    var lines = new List<string>();
+    using (var waveReader = new WaveFileReader(wavFileName)) {
+      using (var resampler = new MediaFoundationResampler(waveReader, new WaveFormat(16000, 16, 1))) {
+        resampler.ResamplerQuality = 60;
+        var recognizer = new VoskRecognizer(model, 16000.0f);
+        var buffer = new byte[4096];
+        while (true) {
+          var bytesRead = resampler.Read(buffer, 0, buffer.Length);
+          if (bytesRead == 0) {
+            break;
+          }
+          if (recognizer.AcceptWaveform(buffer, bytesRead)) {
+            var result = GetTextOf(recognizer.Result());
+            if (!String.IsNullOrEmpty(result)) {
+              Console.WriteLine(result);
+              lines.Add(result);
+            }
+          }
+        }
+        var finalResult = GetTextOf(recognizer.FinalResult());
+        if (!String.IsNullOrEmpty(finalResult)) {
+          Console.WriteLine(finalResult);
+          lines.Add(finalResult);
+        }
+      }
+    }
+    File.WriteAllLines(txtFileName, lines.ToArray(), Encoding.UTF8);
+    Console.WriteLine("==============================================");
+  }
+
+  private static string GetTextOf(String json) {
+    var result = JsonDocument.Parse(json);
+    return (result.RootElement.GetProperty("text").GetString() ?? "").Replace(" ", "");
   }
 }
