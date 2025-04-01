@@ -7,15 +7,18 @@ using System.Text;
 using System.Text.Json;
 
 public class Prog {
-  public static void Main() {
+  public static void Main(string[] args) {
     var modelPath = "vosk-model-small-ja-0.22";
     var wavFileName = "audio.wav";
     var mp3FileName = wavFileName.Replace(".wav", ".mp3");
     var txtFileName = "audio.txt";
     if (Directory.Exists(modelPath)) {
-      Recording(wavFileName);
-      ConvertMP3(wavFileName, mp3FileName);
-      Sampling(wavFileName, txtFileName, modelPath);
+      if (args.Length == 0 || args.ToList().Contains("Recording"))
+          Recording(wavFileName);
+      if (args.Length == 0 || args.ToList().Contains("ConvertMP3"))
+          ConvertMP3(wavFileName, mp3FileName);
+      if (args.Length == 0 || args.ToList().Contains("Sampling"))
+          Sampling(wavFileName, txtFileName, modelPath);
     }
     else {
       Console.WriteLine("「{0}」が存在しません。https://alphacephei.com/vosk/models からダウンロードしてください。", modelPath);
@@ -44,9 +47,14 @@ public class Prog {
   }
 
   private static void ConvertMP3(string wavFileName, string mp3FileName) {
-    Console.WriteLine("wavファイルをmp3ファイルに変換します。");
-    using (var reader = new WaveFileReader(wavFileName)) {
-      MediaFoundationEncoder.EncodeToMp3(reader, mp3FileName);
+    try {
+        Console.WriteLine("wavファイルをmp3ファイルに変換します。");
+        using (var reader = new WaveFileReader(wavFileName)) {
+            MediaFoundationEncoder.EncodeToMp3(reader, mp3FileName);
+        }
+    }
+    catch (Exception ex) {
+        Console.WriteLine(ex);
     }
   }
 
