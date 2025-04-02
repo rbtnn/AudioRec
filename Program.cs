@@ -1,116 +1,133 @@
-﻿
-using NAudio.CoreAudioApi;
-using NAudio.Wave;
+﻿using NAudio.CoreAudioApi;
 using NAudio.Lame;
-using Vosk;
+using NAudio.Wave.SampleProviders;
+using NAudio.Wave;
 using System.Linq;
-using System.Text;
-using System.Text.Json;
 
-public class Prog {
-  public static void Main(string[] args) {
-    var dt = DateTime.Now;
-    var modelPath = "vosk-model-small-ja-0.22";
-    var outdir = "output";
-    var wavFileName =  Path.Combine(outdir, dt.ToString("yyyyMMdd-HHmmss") + ".wav");
-    var mp3FileName = wavFileName.Replace(".wav", ".mp3");
-    var txtFileName = wavFileName.Replace(".wav", ".txt");
-    if (!Directory.Exists(outdir)) {
-      Directory.CreateDirectory(outdir);
-    }
-    Recording(wavFileName);
-    SpeechToText(wavFileName, txtFileName, modelPath);
-    ConvertMP3(wavFileName, mp3FileName);
-  }
-
-  private static void Recording(string wavFileName) {
-    Console.WriteLine("[Recording]");
-    Console.WriteLine("  File Name: {0}", wavFileName);
-    using (var enumerator = new MMDeviceEnumerator()) {
-      var device = enumerator.GetDefaultAudioEndpoint(DataFlow.Render, Role.Console);
-      using (var wasapiCapture = new WasapiLoopbackCapture(device)) {
-        using (var writer = new WaveFileWriter(wavFileName, wasapiCapture.WaveFormat)) {
-          wasapiCapture.DataAvailable += (s, e) => {
-            writer.Write(e.Buffer, 0, e.BytesRecorded);
-          };
-          wasapiCapture.RecordingStopped += (s, e) => {
-            writer.Dispose();
-            wasapiCapture.Dispose();
-          };
-          Console.WriteLine("  Device Name: {0}", device.FriendlyName);
-          Console.Write("  録音開始(Enterキーで停止):");
-          wasapiCapture.StartRecording();
-          Console.ReadLine();
-          wasapiCapture.StopRecording();
-          Console.WriteLine("  録音終了");
+public class Prog
+{
+    public static void Main(string[] args)
+    {
+        var dt = DateTime.Now;
+        var outdir = "output";
+        var tmpdir = "tmp";
+        var speakerFileName = Path.Combine(tmpdir, "speaker.wav");
+        var micFileName = Path.Combine(tmpdir, "mic.wav");
+        var wavFileName = Path.Combine(outdir, dt.ToString("yyyyMMdd-HHmmss") + ".wav");
+        var mp3FileName = wavFileName.Replace(".wav", ".mp3");
+        var txtFileName = wavFileName.Replace(".wav", ".txt");
+        if (!Directory.Exists(outdir))
+        {
+            Directory.CreateDirectory(outdir);
         }
-      }
-    }
-    Console.WriteLine();
-  }
-
-  private static void ConvertMP3(string wavFileName, string mp3FileName) {
-    Console.WriteLine("[ConvertMP3]");
-    using (var reader = new WaveFileReader(wavFileName)) {
-      using (var writer = new LameMP3FileWriter(mp3FileName, reader.WaveFormat, LAMEPreset.VBR_90)) {
-        reader.CopyTo(writer);
-      }
-    }
-    using (var reader = new Mp3FileReader(mp3FileName)) {
-      var len = (new FileInfo(mp3FileName)).Length;
-      var fmb = len / 1024.0 / 1024.0;
-      var fkb = len / 1024.0;
-      var totalTime = reader.TotalTime;
-      var waveFormat = reader.Mp3WaveFormat;
-      Console.WriteLine("  File Name: {0}", mp3FileName);
-      Console.WriteLine("  File Size: {0} {1}",  Math.Floor((fmb < 1 ? fkb : fmb) * 10) / 10, (fmb < 1 ? "KB" : "MB"));
-      Console.WriteLine("  Duration: {0:D2}:{1:D2}:{2:D2}", totalTime.Hours, totalTime.Minutes, totalTime.Seconds);
-      Console.WriteLine("  Sample Rate: {0} Hz", waveFormat.SampleRate);
-      Console.WriteLine("  Channels: {0} ch", waveFormat.Channels);
-      Console.WriteLine("  Bit Rate: {0} kbps", waveFormat.AverageBytesPerSecond * 8 / 1000);
-    }
-    Console.WriteLine();
-  }
-
-  private static void SpeechToText(string wavFileName, string txtFileName, string modelPath) {
-    if (Directory.Exists(modelPath)) {
-      Console.WriteLine("[SpeechToText]");
-      Console.WriteLine("  File Name: {0}", txtFileName);
-      Console.WriteLine("  Model: {0} (https://alphacephei.com/vosk/models)", modelPath);
-      Vosk.Vosk.SetLogLevel(-1);
-      var model = new Model(modelPath);
-      var lines = new List<string>();
-      using (var waveReader = new WaveFileReader(wavFileName)) {
-        using (var resampler = new MediaFoundationResampler(waveReader, new WaveFormat(16000, 16, 1))) {
-          resampler.ResamplerQuality = 60;
-          var recognizer = new VoskRecognizer(model, 16000.0f);
-          var buffer = new byte[4096];
-          while (true) {
-            var bytesRead = resampler.Read(buffer, 0, buffer.Length);
-            if (bytesRead == 0) {
-              break;
-            }
-            if (recognizer.AcceptWaveform(buffer, bytesRead)) {
-              var result = GetTextOf(recognizer.Result());
-              if (!String.IsNullOrEmpty(result)) {
-                lines.Add(result);
-              }
-            }
-          }
-          var finalResult = GetTextOf(recognizer.FinalResult());
-          if (!String.IsNullOrEmpty(finalResult)) {
-            lines.Add(finalResult);
-          }
+        if (!Directory.Exists(tmpdir))
+        {
+            Directory.CreateDirectory(tmpdir);
         }
-      }
-      File.WriteAllLines(txtFileName, lines.ToArray(), Encoding.UTF8);
-      Console.WriteLine();
+        Recording(wavFileName, speakerFileName, micFileName);
+        ConvertMP3(wavFileName, mp3FileName);
+        try
+        {
+            File.Delete(speakerFileName);
+            File.Delete(micFileName);
+            Directory.Delete(tmpdir);
+        }
+        catch (Exception) { }
     }
-  }
 
-  private static string GetTextOf(String json) {
-    var result = JsonDocument.Parse(json);
-    return (result.RootElement.GetProperty("text").GetString() ?? "").Replace(" ", "");
-  }
+    private static void RecordingMix(string mixFileName, string speakerFileName, string micFileName)
+    {
+        using (var micReader = new AudioFileReader(micFileName))
+        {
+            using (var speakerReader = new AudioFileReader(speakerFileName))
+            {
+                var targetFormat = new WaveFormat(44100, 2);
+                var micResampler = new MediaFoundationResampler(micReader, targetFormat);
+                var speakerResampler = new MediaFoundationResampler(speakerReader, targetFormat);
+                var mixer = new MixingSampleProvider(new[] {
+            micResampler.ToSampleProvider(),
+            speakerResampler.ToSampleProvider()
+            });
+                WaveFileWriter.CreateWaveFile16(mixFileName, mixer);
+            }
+        }
+    }
+
+    private static void Recording(string mixFileName, string speakerFileName, string micFileName)
+    {
+        Console.WriteLine("[Recording]");
+        Console.WriteLine("  File Name: {0}", mixFileName);
+        using (var enumerator = new MMDeviceEnumerator())
+        {
+            var speakerDevice = enumerator.GetDefaultAudioEndpoint(DataFlow.Render, Role.Console);
+            var speakerCapture = new WasapiLoopbackCapture(speakerDevice);
+            var micDevice = enumerator.GetDefaultAudioEndpoint(DataFlow.Capture, Role.Communications);
+            var micCapture = new WasapiCapture(micDevice);
+            using (var speakerWriter = new WaveFileWriter(speakerFileName, speakerCapture.WaveFormat))
+            {
+                using (var micWriter = new WaveFileWriter(micFileName, micCapture.WaveFormat))
+                {
+                    speakerCapture.DataAvailable += (s, e) =>
+                    {
+                        speakerWriter.Write(e.Buffer, 0, e.BytesRecorded);
+                    };
+                    speakerCapture.RecordingStopped += (s, e) =>
+                    {
+                        speakerCapture.Dispose();
+                        speakerWriter.Dispose();
+                    };
+
+                    micCapture.DataAvailable += (s, e) =>
+                    {
+                        micWriter.Write(e.Buffer, 0, e.BytesRecorded);
+                    };
+                    micCapture.RecordingStopped += (s, e) =>
+                    {
+                        micCapture.Dispose();
+                        micWriter.Dispose();
+                    };
+
+                    Console.WriteLine("  Speaker Device Name: {0}", speakerDevice.FriendlyName);
+                    Console.WriteLine("  Mic Device Name: {0}", micDevice.FriendlyName);
+                    Console.Write("  録音開始(Enterキーで停止):");
+                    speakerCapture.StartRecording();
+                    micCapture.StartRecording();
+                    Console.ReadLine();
+                    speakerCapture.StopRecording();
+                    micCapture.StopRecording();
+                    Console.WriteLine("  録音終了");
+                }
+            }
+        }
+        RecordingMix(mixFileName, speakerFileName, micFileName);
+        Console.WriteLine();
+    }
+
+    private static void ConvertMP3(string wavFileName, string mp3FileName)
+    {
+        using (var reader = new WaveFileReader(wavFileName))
+        {
+            using (var writer = new LameMP3FileWriter(mp3FileName, reader.WaveFormat, LAMEPreset.VBR_90))
+            {
+                reader.CopyTo(writer);
+            }
+        }
+        using (var reader = new Mp3FileReader(mp3FileName))
+        {
+            var len = (new FileInfo(mp3FileName)).Length;
+            var fmb = len / 1024.0 / 1024.0;
+            var fkb = len / 1024.0;
+            var totalTime = reader.TotalTime;
+            var waveFormat = reader.Mp3WaveFormat;
+            Console.WriteLine("[ConvertMP3]");
+            Console.WriteLine("  File Name: {0}", mp3FileName);
+            Console.WriteLine("  File Size: {0} {1}", Math.Floor((fmb < 1 ? fkb : fmb) * 10) / 10, (fmb < 1 ? "KB" : "MB"));
+            Console.WriteLine("  Duration: {0:D2}:{1:D2}:{2:D2}", totalTime.Hours, totalTime.Minutes, totalTime.Seconds);
+            Console.WriteLine("  Sample Rate: {0} Hz", waveFormat.SampleRate);
+            Console.WriteLine("  Channels: {0} ch", waveFormat.Channels);
+            Console.WriteLine("  Bit Rate: {0} kbps", waveFormat.AverageBytesPerSecond * 8 / 1000);
+            Console.WriteLine();
+        }
+    }
 }
 
