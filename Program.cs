@@ -6,6 +6,8 @@ using System.Linq;
 
 public class Prog
 {
+    private static Object lockObj = new Object();
+
     public static void Main(string[] args)
     {
         var dt = DateTime.Now;
@@ -67,9 +69,13 @@ public class Prog
             {
                 using (var micWriter = new WaveFileWriter(micFileName, micCapture.WaveFormat))
                 {
+                    var speakerAmplitude = 0.0;
+                    var micAmplitude = 0.0;
                     speakerCapture.DataAvailable += (s, e) =>
                     {
                         speakerWriter.Write(e.Buffer, 0, e.BytesRecorded);
+                        speakerAmplitude = CalcAmplitude(e.Buffer, e.BytesRecorded);
+                        PrintWaveLine(speakerDevice.FriendlyName, speakerAmplitude, micDevice.FriendlyName, micAmplitude);
                     };
                     speakerCapture.RecordingStopped += (s, e) =>
                     {
@@ -80,6 +86,8 @@ public class Prog
                     micCapture.DataAvailable += (s, e) =>
                     {
                         micWriter.Write(e.Buffer, 0, e.BytesRecorded);
+                        micAmplitude = CalcAmplitude(e.Buffer, e.BytesRecorded);
+                        PrintWaveLine(speakerDevice.FriendlyName, speakerAmplitude, micDevice.FriendlyName, micAmplitude);
                     };
                     micCapture.RecordingStopped += (s, e) =>
                     {
@@ -87,20 +95,45 @@ public class Prog
                         micWriter.Dispose();
                     };
 
-                    Console.WriteLine("  Speaker Device Name: {0}", speakerDevice.FriendlyName);
-                    Console.WriteLine("  Mic Device Name: {0}", micDevice.FriendlyName);
-                    Console.Write("  録音開始(Enterキーで停止):");
                     speakerCapture.StartRecording();
                     micCapture.StartRecording();
                     Console.ReadLine();
                     speakerCapture.StopRecording();
                     micCapture.StopRecording();
-                    Console.WriteLine("  録音終了");
                 }
             }
         }
         RecordingMix(mixFileName, speakerFileName, micFileName);
         Console.WriteLine();
+    }
+
+    private static float CalcAmplitude(byte[] buffer, double bytesRecorded)
+    {
+        float maxAmplitude = 0;
+        for (int i = 0; i < bytesRecorded; i += 4)
+        {
+            float amplitude = Math.Abs(BitConverter.ToSingle(buffer, i));
+            if (amplitude > maxAmplitude)
+            {
+                maxAmplitude = amplitude;
+            }
+        }
+        return maxAmplitude;
+    }
+
+    private static void PrintWaveLine(string speakerName, double speakerAmplitude, string micName, double micAmplitude)
+    {
+        var barWidth = 40;
+        var speakerBar = new string('█', (int)(speakerAmplitude * barWidth)).PadRight(barWidth, ' ');
+        var micBar = new string('█', (int)(micAmplitude * barWidth)).PadRight(barWidth, ' ');
+        lock (lockObj)
+        {
+            Console.WriteLine($"  {speakerName}");
+            Console.WriteLine($"    [{speakerBar}]");
+            Console.WriteLine($"  {micName}");
+            Console.WriteLine($"    [{micBar}]");
+            Console.SetCursorPosition(0, Console.CursorTop - 4);
+        }
     }
 
     private static void ConvertMP3(string wavFileName, string mp3FileName)
@@ -119,14 +152,19 @@ public class Prog
             var fkb = len / 1024.0;
             var totalTime = reader.TotalTime;
             var waveFormat = reader.Mp3WaveFormat;
-            Console.WriteLine("[ConvertMP3]");
-            Console.WriteLine("  File Name: {0}", mp3FileName);
-            Console.WriteLine("  File Size: {0} {1}", Math.Floor((fmb < 1 ? fkb : fmb) * 10) / 10, (fmb < 1 ? "KB" : "MB"));
-            Console.WriteLine("  Duration: {0:D2}:{1:D2}:{2:D2}", totalTime.Hours, totalTime.Minutes, totalTime.Seconds);
-            Console.WriteLine("  Sample Rate: {0} Hz", waveFormat.SampleRate);
-            Console.WriteLine("  Channels: {0} ch", waveFormat.Channels);
-            Console.WriteLine("  Bit Rate: {0} kbps", waveFormat.AverageBytesPerSecond * 8 / 1000);
-            Console.WriteLine();
+            lock (lockObj)
+            {
+                Console.SetCursorPosition(0, Console.CursorTop + 5);
+                Console.WriteLine();
+                Console.WriteLine("[ConvertMP3]");
+                Console.WriteLine("  File Name: {0}", mp3FileName);
+                Console.WriteLine("  File Size: {0} {1}", Math.Floor((fmb < 1 ? fkb : fmb) * 10) / 10, (fmb < 1 ? "KB" : "MB"));
+                Console.WriteLine("  Duration: {0:D2}:{1:D2}:{2:D2}", totalTime.Hours, totalTime.Minutes, totalTime.Seconds);
+                Console.WriteLine("  Sample Rate: {0} Hz", waveFormat.SampleRate);
+                Console.WriteLine("  Channels: {0} ch", waveFormat.Channels);
+                Console.WriteLine("  Bit Rate: {0} kbps", waveFormat.AverageBytesPerSecond * 8 / 1000);
+                Console.WriteLine();
+            }
         }
     }
 }
